@@ -5,6 +5,10 @@
 #include "misc/helpers.h"
 #include "window.h"
 
+static bool bar_item_has_window(struct bar_item* bar_item, uint32_t adid) {
+  return adid >= 1 && bar_item->num_windows >= adid && bar_item->windows[adid - 1];
+}
+
 bool bar_draws_item(struct bar* bar, struct bar_item* bar_item) {
     if (!bar_item->drawing || !bar->shown || bar->hidden) return false;
 
@@ -89,6 +93,7 @@ void bar_order_item_windows(struct bar* bar) {
   for (int i = 0; i < g_bar_manager.bar_item_count; i++) {
     struct bar_item* bar_item = g_bar_manager.bar_items[i];
     if (bar_item->position == POSITION_POPUP) continue;
+    if (!bar_draws_item(bar, bar_item)) continue;
 
     struct window* window = bar_item_get_window(bar_item, bar->adid);
     window_set_level(window, g_bar_manager.window_level);
@@ -114,12 +119,11 @@ static void bar_check_for_clip_updates(struct bar* bar) {
   if (!g_bar_manager.bar_needs_update) {
     for (int i = 0; i < g_bar_manager.bar_item_count; i++) {
       struct bar_item* bar_item = g_bar_manager.bar_items[i];
-      struct window* window = bar_item_get_window(bar_item, bar->adid);
-
       bool clips_bar = bar_item_clips_bar(bar_item);
       if (!clips_bar || (!bar_draws_item(bar, bar_item))) {
 
-        if (clips_bar && !CGPointEqualToPoint(window->origin, g_nirvana)) {
+        if (clips_bar && bar_item_has_window(bar_item, bar->adid)
+            && !CGPointEqualToPoint(bar_item_get_window(bar_item, bar->adid)->origin, g_nirvana)) {
           g_bar_manager.bar_needs_update = true;
           break;
         }
@@ -127,6 +131,7 @@ static void bar_check_for_clip_updates(struct bar* bar) {
         continue;
       }
 
+      struct window* window = bar_item_get_window(bar_item, bar->adid);
       g_bar_manager.bar_needs_update
                        |= window->needs_move
                           || window->needs_resize
@@ -155,18 +160,22 @@ void bar_draw(struct bar* bar, bool forced) {
 
   for (int i = 0; i < g_bar_manager.bar_item_count; i++) {
     struct bar_item* bar_item = g_bar_manager.bar_items[i];
-    struct window* window = bar_item_get_window(bar_item, bar->adid);
-
     if (!bar_draws_item(bar, bar_item)){
-      if (!CGPointEqualToPoint(window->origin, g_nirvana)) {
-        window_move(window, g_nirvana);
+      if (bar_item_has_window(bar_item, bar->adid)) {
+        struct window* hidden = bar_item_get_window(bar_item, bar->adid);
+        if (!CGPointEqualToPoint(hidden->origin, g_nirvana)) {
+          window_move(hidden, g_nirvana);
+        }
       }
 
       bar_item_remove_associated_bar(bar_item, bar->adid);
       continue;
     }
 
+    if (!(bar_item->associated_bar & (1 << (bar->adid - 1))))
+      g_bar_manager.needs_ordering = true;
     bar_item_append_associated_bar(bar_item, bar->adid);
+    struct window* window = bar_item_get_window(bar_item, bar->adid);
 
     if (bar_item->popup.drawing && bar->adid == g_bar_manager.active_adid)
       popup_draw(&bar_item->popup);
